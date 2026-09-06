@@ -1,0 +1,12 @@
+[package]
+name = "ansi-escape-scanner"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Decode ANSI/VT terminal escape sequences from a byte stream"
+
+[[bin]]
+name = "escan"
+path = "src/main.rs"
+
+[dependencies]
