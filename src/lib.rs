@@ -258,4 +258,92 @@ mod tests {
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].description(), "OSC: 0;my title");
     }
+
+    #[test]
+    fn osc_terminated_by_st() {
+        let tokens = scan(b"\x1b]0;my title\x1b\\after");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].raw, b"\x1b]0;my title\x1b\\");
+        assert_eq!(tokens[0].description(), "OSC: 0;my title");
+    }
+
+    #[test]
+    fn unterminated_osc_consumes_rest_of_input() {
+        let tokens = scan(b"\x1b]0;no terminator here");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, Kind::Osc { data: "0;no terminator here".to_string() });
+    }
+
+    #[test]
+    fn unterminated_csi_is_unknown_and_consumes_rest_of_input() {
+        let tokens = scan(b"\x1b[31;1");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, Kind::Unknown);
+        assert_eq!(tokens[0].raw, b"\x1b[31;1");
+    }
+
+    #[test]
+    fn trailing_esc_with_nothing_after_is_unknown() {
+        let tokens = scan(b"text\x1b");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].offset, 4);
+        assert_eq!(tokens[0].kind, Kind::Unknown);
+        assert_eq!(tokens[0].raw, b"\x1b");
+    }
+
+    #[test]
+    fn empty_params_default_to_zero() {
+        let tokens = scan(b"\x1b[;5H");
+        assert_eq!(
+            tokens[0].kind,
+            Kind::Csi { params: vec![0, 5], final_byte: b'H' }
+        );
+        assert_eq!(tokens[0].description(), "cursor position: row 0, col 5");
+    }
+
+    #[test]
+    fn csi_with_no_params_at_all() {
+        let tokens = scan(b"\x1b[m");
+        assert_eq!(tokens[0].kind, Kind::Csi { params: vec![], final_byte: b'm' });
+        assert_eq!(tokens[0].description(), "reset");
+    }
+
+    #[test]
+    fn esc_followed_by_esc_is_a_simple_sequence() {
+        let tokens = scan(b"\x1b\x1b[31m");
+        // The first ESC pairs with the following ESC byte as a two-byte simple
+        // sequence, so the "[31m" that follows is plain text, not a second token.
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, Kind::Simple { final_byte: ESC });
+    }
+
+    #[test]
+    fn finds_multiple_sequences_with_correct_offsets() {
+        let tokens = scan(b"a\x1b7b\x1b8c");
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[0].offset, 1);
+        assert_eq!(tokens[0].kind, Kind::Simple { final_byte: b'7' });
+        assert_eq!(tokens[1].offset, 4);
+        assert_eq!(tokens[1].kind, Kind::Simple { final_byte: b'8' });
+    }
+
+    #[test]
+    fn unknown_csi_final_byte_reports_params() {
+        let tokens = scan(b"\x1b[12;34x");
+        assert_eq!(
+            tokens[0].description(),
+            "CSI sequence, final byte 'x', params [12, 34]"
+        );
+    }
+
+    #[test]
+    fn raw_display_escapes_control_and_backslash_bytes() {
+        let tokens = scan(b"\x1b]0;a\\b\x07");
+        assert_eq!(tokens[0].raw_display(), "\\x1b]0;a\\\\b\\x07");
+    }
+
+    #[test]
+    fn no_escapes_found() {
+        assert!(scan(b"just plain text").is_empty());
+    }
 }
