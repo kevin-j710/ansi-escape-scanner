@@ -184,11 +184,63 @@ fn describe_sgr(params: &[i64]) -> String {
     if params.is_empty() {
         return sgr_name(0);
     }
-    params
-        .iter()
-        .map(|&p| sgr_name(p))
-        .collect::<Vec<_>>()
-        .join(", ")
+    let mut parts = Vec::new();
+    let mut i = 0;
+    while i < params.len() {
+        match params[i] {
+            p @ (38 | 48) => {
+                let (desc, consumed) = describe_extended_color(p, &params[i + 1..]);
+                parts.push(desc);
+                i += 1 + consumed;
+            }
+            p => {
+                parts.push(sgr_name(p));
+                i += 1;
+            }
+        }
+    }
+    parts.join(", ")
+}
+
+/// Handle the `38;...` / `48;...` extended color forms: 256-color palette
+/// (`38;5;n`) and truecolor (`38;2;r;g;b`). Returns the description plus how
+/// many entries after `base` were consumed, so the caller can skip past them.
+fn describe_extended_color(base: i64, rest: &[i64]) -> (String, usize) {
+    let ground = if base == 38 { "foreground" } else { "background" };
+    match rest.first() {
+        None => (format!("SGR {} (missing color-space selector)", base), 0),
+        Some(5) => match rest.get(1) {
+            Some(&n) => (format!("256-color {} (index {})", ground, n), 2),
+            None => (format!("SGR {};5 (missing 256-color index)", base), 1),
+        },
+        Some(2) => {
+            if let [r, g, b, ..] = rest[1..] {
+                (
+                    format!(
+                        "truecolor {} (#{:02x}{:02x}{:02x})",
+                        ground,
+                        clamp_channel(r),
+                        clamp_channel(g),
+                        clamp_channel(b)
+                    ),
+                    4,
+                )
+            } else {
+                (
+                    format!("SGR {};2 (incomplete truecolor {})", base, ground),
+                    rest.len(),
+                )
+            }
+        }
+        Some(other) => (
+            format!("SGR {} (unknown color-space selector {})", base, other),
+            1,
+        ),
+    }
+}
+
+fn clamp_channel(v: i64) -> u8 {
+    v.clamp(0, 255) as u8
 }
 
 fn sgr_name(code: i64) -> String {
@@ -345,5 +397,71 @@ mod tests {
     #[test]
     fn no_escapes_found() {
         assert!(scan(b"just plain text").is_empty());
+    }
+
+    #[test]
+    fn sgr_256_color_foreground() {
+        let tokens = scan(b"\x1b[38;5;208m");
+        assert_eq!(tokens[0].description(), "256-color foreground (index 208)");
+    }
+
+    #[test]
+    fn sgr_256_color_background() {
+        let tokens = scan(b"\x1b[48;5;22m");
+        assert_eq!(tokens[0].description(), "256-color background (index 22)");
+    }
+
+    #[test]
+    fn sgr_truecolor_foreground() {
+        let tokens = scan(b"\x1b[38;2;255;100;0m");
+        assert_eq!(tokens[0].description(), "truecolor foreground (#ff6400)");
+    }
+
+    #[test]
+    fn sgr_truecolor_background() {
+        let tokens = scan(b"\x1b[48;2;0;128;255m");
+        assert_eq!(tokens[0].description(), "truecolor background (#0080ff)");
+    }
+
+    #[test]
+    fn sgr_extended_color_combined_with_other_attributes() {
+        let tokens = scan(b"\x1b[1;38;5;208;4m");
+        assert_eq!(
+            tokens[0].description(),
+            "bold, 256-color foreground (index 208), underline"
+        );
+    }
+
+    #[test]
+    fn sgr_extended_color_missing_selector() {
+        let tokens = scan(b"\x1b[38m");
+        assert_eq!(
+            tokens[0].description(),
+            "SGR 38 (missing color-space selector)"
+        );
+    }
+
+    #[test]
+    fn sgr_256_color_missing_index() {
+        let tokens = scan(b"\x1b[38;5m");
+        assert_eq!(tokens[0].description(), "SGR 38;5 (missing 256-color index)");
+    }
+
+    #[test]
+    fn sgr_truecolor_incomplete() {
+        let tokens = scan(b"\x1b[38;2;255m");
+        assert_eq!(
+            tokens[0].description(),
+            "SGR 38;2 (incomplete truecolor foreground)"
+        );
+    }
+
+    #[test]
+    fn sgr_extended_color_unknown_selector() {
+        let tokens = scan(b"\x1b[38;9;1m");
+        assert_eq!(
+            tokens[0].description(),
+            "SGR 38 (unknown color-space selector 9), bold"
+        );
     }
 }

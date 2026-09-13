@@ -46,6 +46,15 @@ $ printf 'plain \x1b[1;31mbold red\x1b[0m plain\n' | escan --json
 [{"offset":6,"raw":"\x1b[1;31m","description":"bold, red foreground"},{"offset":20,"raw":"\x1b[0m","description":"reset"}]
 ```
 
+256-color and truecolor SGR sequences are decoded too:
+
+```
+$ printf '\x1b[38;5;208mtext\x1b[38;2;0;128;255m\x1b[0m' | escan
+     0  \x1b[38;5;208m                256-color foreground (index 208)
+    24  \x1b[38;2;0;128;255m          truecolor foreground (#0080ff)
+    43  \x1b[0m                      reset
+```
+
 An OSC sequence (these are what set a terminal's window title, among other
 things):
 
