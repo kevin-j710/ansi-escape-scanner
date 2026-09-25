@@ -285,6 +285,22 @@ fn color_name(n: u8) -> &'static str {
     }
 }
 
+/// Remove every escape sequence `scan` finds from `input`, returning the bytes that are left.
+/// This covers sequences with an unrecognized final byte, unterminated CSI/OSC runs that eat
+/// the rest of the input, and a lone trailing ESC with nothing after it - none of it is text,
+/// so all of it is cut. Everything `scan` doesn't touch passes through unchanged.
+pub fn strip(input: &[u8]) -> Vec<u8> {
+    let tokens = scan(input);
+    let mut out = Vec::with_capacity(input.len());
+    let mut i = 0;
+    for t in &tokens {
+        out.extend_from_slice(&input[i..t.offset]);
+        i = t.offset + t.raw.len();
+    }
+    out.extend_from_slice(&input[i..]);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,5 +479,38 @@ mod tests {
             tokens[0].description(),
             "SGR 38 (unknown color-space selector 9), bold"
         );
+    }
+
+    #[test]
+    fn strip_removes_sgr_and_leaves_text() {
+        assert_eq!(
+            strip(b"a\x1b[31mb\x1b[0mc"),
+            b"abc".to_vec()
+        );
+    }
+
+    #[test]
+    fn strip_removes_osc_title() {
+        assert_eq!(strip(b"before\x1b]0;title\x07after"), b"beforeafter".to_vec());
+    }
+
+    #[test]
+    fn strip_removes_simple_sequences() {
+        assert_eq!(strip(b"a\x1b7b\x1b8c"), b"abc".to_vec());
+    }
+
+    #[test]
+    fn strip_drops_unterminated_csi_along_with_rest_of_input() {
+        assert_eq!(strip(b"a\x1b[31;1"), b"a".to_vec());
+    }
+
+    #[test]
+    fn strip_drops_trailing_lone_esc() {
+        assert_eq!(strip(b"text\x1b"), b"text".to_vec());
+    }
+
+    #[test]
+    fn strip_with_no_escapes_is_unchanged() {
+        assert_eq!(strip(b"just plain text"), b"just plain text".to_vec());
     }
 }

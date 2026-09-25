@@ -63,6 +63,14 @@ $ printf '\x1b]0;session name\x07' | escan
      0  \x1b]0;session name\x07       OSC: 0;session name
 ```
 
+Strip the sequences out and keep just the text, e.g. before feeding a log
+into something that doesn't expect color codes:
+
+```
+$ printf 'plain \x1b[1;31mbold red\x1b[0m plain\n' | escan --strip
+plain bold red plain
+```
+
 ## As a library
 
 ```rust

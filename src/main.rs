@@ -3,15 +3,17 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::process::ExitCode;
 
-use ansi_escape_scanner::{scan, Token};
+use ansi_escape_scanner::{scan, strip, Token};
 
 fn main() -> ExitCode {
     let mut json = false;
+    let mut strip_mode = false;
     let mut path: Option<String> = None;
 
     for arg in env::args().skip(1) {
         match arg.as_str() {
             "--json" => json = true,
+            "--strip" => strip_mode = true,
             "-h" | "--help" => {
                 print_usage();
                 return ExitCode::SUCCESS;
@@ -25,6 +27,11 @@ fn main() -> ExitCode {
         }
     }
 
+    if json && strip_mode {
+        eprintln!("escan: --json and --strip can't be used together");
+        return ExitCode::FAILURE;
+    }
+
     let input = match read_input(path.as_deref()) {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -33,14 +40,17 @@ fn main() -> ExitCode {
         }
     };
 
-    let tokens = scan(&input);
-
     let stdout = io::stdout();
     let mut out = stdout.lock();
-    let result = if json {
-        write_json(&mut out, &tokens)
+    let result = if strip_mode {
+        out.write_all(&strip(&input))
     } else {
-        write_human(&mut out, &tokens)
+        let tokens = scan(&input);
+        if json {
+            write_json(&mut out, &tokens)
+        } else {
+            write_human(&mut out, &tokens)
+        }
     };
 
     if let Err(e) = result {
@@ -113,6 +123,8 @@ fn json_escape(s: &str) -> String {
 }
 
 fn print_usage() {
-    eprintln!("usage: escan [--json] [file]");
+    eprintln!("usage: escan [--json | --strip] [file]");
     eprintln!("  reads from stdin if no file is given");
+    eprintln!("  --json   emit one JSON object per sequence found");
+    eprintln!("  --strip  write the input back out with all escape sequences removed");
 }
